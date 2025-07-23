@@ -149,5 +149,3 @@ flowchart TD
 For questions or support, contact the DevOps team or open an issue in this repository.
 
 ---
-
-**Happy building!** 🚀 
