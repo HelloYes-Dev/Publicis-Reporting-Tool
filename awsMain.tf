@@ -15,9 +15,7 @@ provider "aws" {
   region = var.aws_region
 }
 
-##############################
 # Variables
-##############################
 
 variable "aws_region" {
   description = "AWS region to deploy resources in"
@@ -41,17 +39,13 @@ variable "lambda_s3_bucket" {
   type        = string
 }
 
-##############################
 # Random Suffix for Uniqueness
-##############################
 
 resource "random_id" "unique_id" {
   byte_length = 4
 }
 
-##############################
 # VPC & Networking
-##############################
 
 resource "aws_vpc" "main" {
   cidr_block = "10.0.0.0/16"
@@ -80,9 +74,7 @@ resource "aws_subnet" "db" {
   }
 }
 
-##############################
 # Security Groups
-##############################
 
 resource "aws_security_group" "lambda_sg" {
   name        = "lambda-sg"
@@ -126,9 +118,7 @@ resource "aws_security_group" "db_sg" {
   }
 }
 
-##############################
 # S3 Buckets (App Storage & Vector Storage)
-##############################
 
 resource "aws_s3_bucket" "app_storage" {
   bucket = "publicis-app-storage-${random_id.unique_id.hex}"
@@ -148,9 +138,7 @@ resource "aws_s3_bucket" "vector_storage" {
   }
 }
 
-##############################
 # AWS Secrets Manager
-##############################
 
 resource "aws_secretsmanager_secret" "pg_admin" {
   name = "publicis-pg-admin-password"
@@ -161,9 +149,7 @@ resource "aws_secretsmanager_secret_version" "pg_admin_version" {
   secret_string = var.pg_admin_password
 }
 
-##############################
 # RDS PostgreSQL
-##############################
 
 resource "aws_db_subnet_group" "db_subnet_group" {
   name       = "publicis-db-subnet-group"
@@ -191,9 +177,7 @@ resource "aws_db_instance" "pg" {
   }
 }
 
-##############################
 # Lambda IAM Role & Policies
-##############################
 
 resource "aws_iam_role" "lambda_exec" {
   name = "lambda-exec-role-publicis"
@@ -229,16 +213,25 @@ resource "aws_iam_role_policy_attachment" "lambda_rds" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonRDSFullAccess"
 }
 
-##############################
+# Attach CloudWatch and X-Ray policies for Lambda monitoring
+resource "aws_iam_role_policy_attachment" "lambda_cloudwatch" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchFullAccess"
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_xray" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
 # Lambda Function (Web/API App)
-##############################
 
 resource "aws_lambda_function" "webapp" {
   function_name = "publicis-webapp-${random_id.unique_id.hex}"
   s3_bucket     = var.lambda_s3_bucket
   s3_key        = var.lambda_s3_key
-  handler       = "index.handler" # Update as per your app
-  runtime       = "nodejs18.x"    # Update as per your app
+  handler       = "index.handler" 
+  runtime       = "nodejs18.x"    
   role          = aws_iam_role.lambda_exec.arn
   timeout       = 30
   memory_size   = 1024
@@ -253,12 +246,13 @@ resource "aws_lambda_function" "webapp" {
       BEDROCK_REGION         = var.aws_region
     }
   }
+  tracing_config {
+    mode = "Active" 
+  }
   depends_on = [aws_iam_role_policy_attachment.lambda_basic]
 }
 
-##############################
 # API Gateway (HTTP API)
-##############################
 
 resource "aws_apigatewayv2_api" "webapp_api" {
   name          = "publicis-webapp-api"
@@ -293,9 +287,7 @@ resource "aws_lambda_permission" "apigw_invoke" {
   source_arn    = "${aws_apigatewayv2_api.webapp_api.execution_arn}/*/*"
 }
 
-##############################
 # CloudFront & WAF
-##############################
 
 resource "aws_wafv2_web_acl" "web_acl" {
   name        = "publicis-waf"
@@ -328,9 +320,7 @@ resource "aws_wafv2_web_acl" "web_acl" {
   }
 }
 
-##############################
 # S3 Bucket for Static Frontend Hosting
-##############################
 
 resource "aws_s3_bucket" "frontend" {
   bucket = "publicis-frontend-${random_id.unique_id.hex}"
@@ -368,9 +358,7 @@ resource "aws_s3_bucket_policy" "frontend_policy" {
   })
 }
 
-##############################
 # CloudFront with S3 + API Gateway Origins
-##############################
 
 resource "aws_cloudfront_origin_access_control" "frontend_oac" {
   name                              = "frontend-oac"
@@ -444,9 +432,7 @@ resource "aws_cloudfront_distribution" "webapp" {
   }
 }
 
-##############################
 # AWS Budgets
-##############################
 
 resource "aws_budgets_budget" "publicis_budget" {
   name              = "publicis-budget"
@@ -463,9 +449,7 @@ resource "aws_budgets_budget" "publicis_budget" {
   }
 }
 
-##############################
 # Outputs
-##############################
 
 output "vpc_id" {
   description = "VPC ID"
@@ -512,10 +496,4 @@ output "frontend_s3_bucket" {
   value       = aws_s3_bucket.frontend.bucket
 }
 
-# ---
-# GitHub CI/CD Deployment Notes:
-# - In your GitHub Actions workflow, build your Next.js frontend (e.g., `next build && next export` or `next build` for static output).
-# - Use the AWS CLI or a GitHub Action to sync the build output (e.g., `out/` or `.next/static/`) to the S3 bucket `${aws_s3_bucket.frontend.bucket}`.
-# - CloudFront will serve the static frontend from S3 and route /api/* to your backend API.
-# ---
 
